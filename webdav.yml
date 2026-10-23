@@ -1,0 +1,9 @@
+address: 127.0.0.1
+port: 6065
+prefix: /dav
+directory: /data
+permissions: CRUD
+behindProxy: true
+users:
+  - username: "{env}WEBDAV_USER"
+    password: "{env}WEBDAV_PASSWORD"
