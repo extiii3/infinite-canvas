@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { useConfigStore } from "@/stores/use-config-store";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
+import { useWebdavAutoSync } from "@/hooks/use-webdav-auto-sync";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
@@ -14,6 +15,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
     usePromptSourceScheduler();
+    useWebdavAutoSync();
 
     useEffect(() => {
         if (handledConfigParams.current) return;
