@@ -18,6 +18,7 @@ COPY web/docker-entrypoint.sh /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=ghcr.io/hacdias/webdav:latest /bin/webdav /usr/local/bin/webdav
 COPY webdav.yml /etc/webdav.yml
 COPY webdav-start.sh /docker-entrypoint.d/50-webdav.sh
-RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/50-webdav.sh
+COPY upstreams-gen.sh /docker-entrypoint.d/45-upstreams.sh
+RUN mkdir -p /etc/nginx/upstreams && chmod +x /docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/45-upstreams.sh /docker-entrypoint.d/50-webdav.sh
 
 EXPOSE 3000
