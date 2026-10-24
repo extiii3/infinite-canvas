@@ -15,12 +15,11 @@ FROM nginx:1.27-alpine
 COPY --from=web-build /app/web/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY web/docker-entrypoint.sh /docker-entrypoint.d/40-runtime-config.sh
-COPY upstreams-gen.sh /docker-entrypoint.d/45-upstreams.sh
 # Storage server (Bun + SQLite) for the shared workspace.
 RUN apk add --no-cache libstdc++ libgcc
 COPY --from=oven/bun:1.3.13-alpine /usr/local/bin/bun /usr/local/bin/bun
 COPY server /app/server
 COPY storage-start.sh /docker-entrypoint.d/55-storage.sh
-RUN mkdir -p /etc/nginx/upstreams && chmod +x /docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/45-upstreams.sh /docker-entrypoint.d/55-storage.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/55-storage.sh
 
 EXPOSE 3000

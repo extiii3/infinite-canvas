@@ -13,11 +13,15 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
+import { loadUpstreams, proxyUpstream } from "./upstream";
+
 const DATA_DIR = process.env.STORAGE_DIR || "/data/server";
 const BLOB_DIR = join(DATA_DIR, "blobs");
 const PORT = Number(process.env.STORAGE_PORT || 8787);
 const HOST = process.env.STORAGE_HOST || "127.0.0.1";
 const MAX_BODY = 200 * 1024 * 1024;
+const LOG_STORAGE = (process.env.LOG_STORAGE || "writes").toLowerCase(); // all | writes | off
+const upstreams = loadUpstreams();
 
 mkdirSync(BLOB_DIR, { recursive: true });
 const db = new Database(join(DATA_DIR, "app.db"), { create: true });
@@ -183,12 +187,7 @@ function segments(pathname: string) {
     .map((part) => decodeURIComponent(part));
 }
 
-const server = Bun.serve({
-  hostname: HOST,
-  port: PORT,
-  maxRequestBodySize: MAX_BODY,
-  async fetch(req) {
-    const url = new URL(req.url);
+async function handleApi(req: Request, url: URL): Promise<Response> {
     let parts: string[];
     try {
       parts = segments(url.pathname);
@@ -222,7 +221,37 @@ const server = Bun.serve({
       console.error("[storage]", req.method, url.pathname, error);
       return json({ error: "internal error" }, 500);
     }
+}
+
+function logStorage(req: Request, url: URL, res: Response, ms: number) {
+  if (LOG_STORAGE === "off") return;
+  const write = req.method !== "GET" && req.method !== "HEAD";
+  const problem = res.status >= 400 && !(res.status === 404 && !write);
+  if (LOG_STORAGE !== "all" && !write && !problem) return;
+  let path = url.pathname.replace(/^\/api\/?/, "");
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    /* keep raw */
+  }
+  const size = Number(req.headers.get("content-length") || 0);
+  const rev = res.headers.get("X-KV-Rev");
+  console.log(`[storage] ${req.method} ${path}${url.search} ${res.status}${rev && rev !== "0" ? ` rev=${rev}` : ""}${size ? ` ${size < 1024 ? size + "B" : (size / 1024).toFixed(1) + "KB"}` : ""} ${ms.toFixed(0)}ms`);
+}
+
+const server = Bun.serve({
+  hostname: HOST,
+  port: PORT,
+  maxRequestBodySize: MAX_BODY,
+  idleTimeout: 255, // seconds; slow image generations must not be cut off (Cloudflare caps at 100s anyway)
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname.startsWith("/upstream/")) return proxyUpstream(req, url, upstreams);
+    const started = performance.now();
+    const res = await handleApi(req, url);
+    logStorage(req, url, res, performance.now() - started);
+    return res;
   },
 });
 
-console.log(`[storage] listening on ${server.hostname}:${server.port}, data in ${DATA_DIR}`);
+console.log(`[storage] listening on ${server.hostname}:${server.port}, data in ${DATA_DIR}, storage log: ${LOG_STORAGE}`);
