@@ -8,6 +8,7 @@ import { initCore, LOCAL_ONLY_STORES, migrateOnce, registerMerger, SYNCED_DBS } 
 import { SERVER_DRIVER, serverStorageDriver } from "./driver";
 import { ASSET_KEY, CANVAS_KEY, mergeAssetValue, mergeCanvasValue } from "./merge";
 import { startMirror } from "./mirror";
+import { updateSyncStatus } from "./status";
 
 const MODE_FLAG = "infinite-canvas:server-storage";
 
@@ -26,6 +27,7 @@ export async function bootServerStorage(): Promise<number | null> {
         // Known server deployment but offline right now: run from the cache and sync when back.
     }
     localStorage.setItem(MODE_FLAG, "1");
+    updateSyncStatus({ mode: "cloud", lastSyncAt: rev ? Date.now() : null });
 
     const raw = localforage.createInstance.bind(localforage);
     initCore(raw);

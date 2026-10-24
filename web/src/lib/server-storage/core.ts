@@ -3,6 +3,7 @@
 import localforage from "localforage";
 
 import { OfflineError, storageApi } from "./client";
+import { markPending, updateSyncStatus } from "./status";
 
 export const SYNCED_DBS = new Set(["infinite-canvas", "infinite-canvas-plugins"]);
 /** Derived/cache data that stays in this browser only. */
@@ -119,11 +120,14 @@ export function schedulePush(db: string, store: string, key: string, options: { 
         again.add(fk);
         return running;
     }
+    markPending(fk, true);
     const run = (async () => {
         do {
             again.delete(fk);
             await pushOnce(db, store, key, options.createOnly === true);
         } while (again.has(fk));
+        markPending(fk, false);
+        updateSyncStatus({ lastSyncAt: Date.now() });
     })()
         .catch((error) => {
             if (!(error instanceof OfflineError)) console.warn("[server-storage] push failed", key, error);
@@ -213,6 +217,33 @@ export async function flushDirty() {
         const [db, store, key] = splitKey(fk);
         void schedulePush(db, store, key);
     }
+}
+
+/** Push pending writes and wait for them (bounded). Returns the number still unsynced. */
+export async function flushNow(timeoutMs = 8000) {
+    await flushDirty();
+    const deadline = Date.now() + timeoutMs;
+    while (inFlight.size && Date.now() < deadline) {
+        await Promise.race([Promise.allSettled([...inFlight.values()]), new Promise((resolve) => setTimeout(resolve, 250))]);
+    }
+    let dirty = 0;
+    await metaStore
+        .iterate<Meta, void>((meta) => {
+            if (meta?.dirty) dirty += 1;
+        })
+        .catch(() => undefined);
+    return dirty;
+}
+
+/** Wipe this browser's copy of the workspace (used on logout). Server data is untouched. */
+export async function clearLocalCache(extraStores: Array<[string, string]> = []) {
+    const targets = new Map<string, LocalForage>(caches);
+    for (const [db, store] of [...MIGRATE_STORES, ...extraStores]) targets.set(`${db}${SEP}${store}`, getCache(db, store));
+    await Promise.all([...targets.values()].map((cache) => cache.clear().catch(() => undefined)));
+    await metaStore.clear().catch(() => undefined);
+    metaMemo.clear();
+    bases.clear();
+    lastServer.clear();
 }
 
 // ---------- remote change handling ----------

@@ -2,6 +2,7 @@
 // to the storage server. Last write wins; values are pulled before the app's stores are created.
 import { OfflineError, storageApi } from "./client";
 import { ownRevs } from "./core";
+import { markPending, updateSyncStatus } from "./status";
 
 export const MIRROR_DB = "__localStorage";
 export const MIRROR_STORE = "default";
@@ -12,12 +13,17 @@ const lastSynced = new Map<string, string | null>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 let originalSet: (this: Storage, key: string, value: string) => void;
 let originalRemove: (this: Storage, key: string) => void;
+let disabled = false;
 
 const setLocal = (key: string, value: string) => originalSet.call(window.localStorage, key, value);
 
 async function push(key: string) {
+    if (disabled) return;
     const value = window.localStorage.getItem(key);
-    if (value === lastSynced.get(key)) return;
+    if (value === lastSynced.get(key)) {
+        markPending(`ls:${key}`, false);
+        return;
+    }
     try {
         if (value === null) {
             ownRevs.add(await storageApi.remove(MIRROR_DB, MIRROR_STORE, key));
@@ -31,6 +37,8 @@ async function push(key: string) {
             }
         }
         lastSynced.set(key, value);
+        markPending(`ls:${key}`, false);
+        updateSyncStatus({ lastSyncAt: Date.now() });
     } catch (error) {
         if (!(error instanceof OfflineError)) console.warn("[server-storage] config push failed", key, error);
         schedule(key, 10_000);
@@ -38,6 +46,8 @@ async function push(key: string) {
 }
 
 function schedule(key: string, delay = 500) {
+    if (disabled) return;
+    markPending(`ls:${key}`, true);
     clearTimeout(timers.get(key));
     timers.set(key, setTimeout(() => void push(key), delay));
 }
@@ -68,6 +78,13 @@ export async function startMirror() {
         originalRemove.call(this, key);
         if (this === window.localStorage && MIRRORED_KEYS.has(key)) schedule(key);
     };
+}
+
+/** Logout: drop this browser's copy of shared config without touching the server copy. */
+export function clearMirroredLocal() {
+    disabled = true;
+    timers.forEach((timer) => clearTimeout(timer));
+    for (const key of MIRRORED_KEYS) (originalRemove || Storage.prototype.removeItem).call(window.localStorage, key);
 }
 
 /** Another browser changed a mirrored key: refresh localStorage and rehydrate the owning store. */

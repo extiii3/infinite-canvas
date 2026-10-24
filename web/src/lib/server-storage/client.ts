@@ -1,4 +1,5 @@
 // HTTP client for the storage server (/api, same origin, behind Cloudflare Access).
+import { updateSyncStatus } from "./status";
 
 export const API_BASE = "/api";
 
@@ -25,11 +26,15 @@ async function call(url: string, init?: RequestInit): Promise<Response> {
     try {
         response = await fetch(url, { credentials: "same-origin", cache: "no-store", redirect: "manual", ...init });
     } catch (error) {
+        updateSyncStatus({ online: false });
         throw new OfflineError(error instanceof Error ? error.message : String(error));
     }
     // Cloudflare Access session expiry shows up as a redirect / opaque response.
-    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400 && response.status !== 304)) throw new OfflineError("session expired");
-    if (response.status >= 500) throw new OfflineError(`server error ${response.status}`);
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400 && response.status !== 304) || response.status >= 500) {
+        updateSyncStatus({ online: false });
+        throw new OfflineError(response.status >= 500 ? `server error ${response.status}` : "session expired");
+    }
+    updateSyncStatus({ online: true });
     return response;
 }
 
@@ -101,6 +106,12 @@ export const storageApi = {
     async list(db: string, store: string, withValues: boolean): Promise<{ rev: number; items: ListItem[] }> {
         const response = await call(`${kvUrl(db, store)}${withValues ? "?values=1" : ""}`);
         if (!response.ok) throw new Error(`storage LIST ${response.status}`);
+        return response.json();
+    },
+
+    async stats(): Promise<{ keys: number; files: number; bytes: number; rev: number }> {
+        const response = await call(`${API_BASE}/stats`);
+        if (!response.ok) throw new Error(`storage STATS ${response.status}`);
         return response.json();
     },
 

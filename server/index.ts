@@ -2,6 +2,7 @@
 // Runs on 127.0.0.1 behind nginx (/api/*), which enforces the Cloudflare origin secret.
 //
 //   GET    /api/health                       -> { ok, rev }
+//   GET    /api/stats                        -> { keys, files, bytes, rev }
 //   GET    /api/changes?since=N              -> { rev, more, changes: [{ db, store, key, rev, deleted, kind }] }
 //   GET    /api/kv/:db/:store[?values=1]     -> { rev, items: [{ key, rev, kind, mime, size, value? }] }
 //   GET    /api/kv/:db/:store/:key           -> raw value (X-KV-Rev, X-KV-Kind); 304 on If-None-Match
@@ -47,6 +48,9 @@ const q = {
      ON CONFLICT (db, store, key) DO UPDATE SET kind = $kind, mime = $mime, size = $size, value = $value, file = $file, rev = $rev, deleted = 0, updated_at = $now`,
   ),
   tomb: db.query("UPDATE kv SET deleted = 1, value = NULL, file = NULL, size = 0, rev = $rev, updated_at = $now WHERE db = $db AND store = $store AND key = $key"),
+  stats: db.query<{ keys: number; files: number; bytes: number }, []>(
+    "SELECT COUNT(*) AS keys, COALESCE(SUM(kind = 'blob'), 0) AS files, COALESCE(SUM(size), 0) AS bytes FROM kv WHERE deleted = 0",
+  ),
   changes: db.query<{ db: string; store: string; key: string; rev: number; deleted: number; kind: string }, [number, number]>(
     "SELECT db, store, key, rev, deleted, kind FROM kv WHERE rev > ? ORDER BY rev LIMIT ?",
   ),
@@ -195,6 +199,7 @@ const server = Bun.serve({
     const [, route, dbName, store, key, ...extra] = parts;
     try {
       if (route === "health" && req.method === "GET") return json({ ok: true, rev: currentRev() });
+      if (route === "stats" && req.method === "GET") return json({ ...q.stats.get()!, rev: currentRev() });
       if (route === "changes" && req.method === "GET") return changes(Math.max(0, Number(url.searchParams.get("since")) || 0));
       if (route !== "kv" || !dbName || !store || extra.length) return json({ error: "not found" }, 404);
       if (!key) {
