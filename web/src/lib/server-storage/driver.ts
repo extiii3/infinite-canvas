@@ -39,7 +39,10 @@ async function getItem(state: State, key: string): Promise<unknown> {
     }
     try {
         const remote = BLOB_STORES.has(store) && cached === null ? await readBlobWithRetry(state, key) : await storageApi.get(db, store, key, cached !== null && meta?.rev ? meta.rev : undefined);
-        if (remote === "not-modified") return cached;
+        if (remote === "not-modified") {
+            await acknowledge(fk, cached, meta!.rev); // remember the confirmed value so unchanged re-saves are skipped
+            return cached;
+        }
         if (remote === null) {
             if (meta?.rev) {
                 await cache.removeItem(key); // deleted by someone else

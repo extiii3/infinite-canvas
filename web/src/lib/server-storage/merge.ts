@@ -30,14 +30,15 @@ export function mergeItems(base: unknown, local: unknown, remote: unknown, timeF
         const l = L.get(id);
         const r = R.get(id);
         const b = B.get(id);
-        if (l && r) out.push(time(l, timeField) >= time(r, timeField) ? l : r);
+        if (l && r) out.push(time(l, timeField) > time(r, timeField) ? l : r); // tie -> server copy wins (convergence)
         else if (l) {
             if (!b || time(l, timeField) > time(b, timeField)) out.push(l);
         } else if (r) {
             if (!b || time(r, timeField) > time(b, timeField)) out.push(r);
         }
     }
-    return out.sort((a, b) => time(b, timeField) - time(a, timeField));
+    // Deterministic order (ties broken by id) so every browser serializes the same merge identically.
+    return out.sort((a, b) => time(b, timeField) - time(a, timeField) || String(a.id).localeCompare(String(b.id)));
 }
 
 const parse = (value: unknown): Persisted | null => {
@@ -74,7 +75,7 @@ export function mergeCanvasValue(base: unknown, local: unknown, remote: unknown)
         }
         return false;
     });
-    const deletedProjects = [...deletedAt.entries()].map(([id, at]) => ({ id, deletedAt: at }));
+    const deletedProjects = [...deletedAt.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, at]) => ({ id, deletedAt: at }));
     return JSON.stringify({ state: { projects, deletedProjects }, version: r.version ?? l.version ?? 0 });
 }
 
